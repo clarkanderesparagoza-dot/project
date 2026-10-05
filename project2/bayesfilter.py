@@ -28,15 +28,18 @@ class BeliefStateAgent(Agent):
         self.p = 0.5
         self.n = int(self.sensor_variance / (self.p * (1 - self.p)))
 
-        # กำหนดพารามิเตอร์พฤติกรรมความกลัวของผี (p_flee) สำหรับ Transition Model
+        # พารามิเตอร์ theta ของ Transition Model: น้ำหนักของการเดินที่ไม่ทำให้
+        # ผีเข้าใกล้ Pacman (น้ำหนักของการเดินเข้าหาคือ 1) ตรงกับ
+        # getDistribution ใน ghostAgents.py:
+        # confused = 1, afraid = 2, scared = 2**3 = 8
         if self.ghost_type == "scared":
-            self.p_flee = 0.8
+            self.theta = 8.0
         elif self.ghost_type == "afraid":
-            self.p_flee = 0.5
+            self.theta = 2.0
         elif self.ghost_type == "confused":
-            self.p_flee = 0.2
+            self.theta = 1.0
         else:
-            self.p_flee = 0.5
+            self.theta = 2.0
 
         # ตัวแปรสำหรับบันทึกข้อมูล Metrics นำไปพล็อตกราฟรายงาน
         self.metrics_history = []
@@ -98,31 +101,19 @@ class BeliefStateAgent(Agent):
                             legal_moves.append((w1, h1))
 
                     if legal_moves:
-                        # คำนวณความต่างของระยะทางเพื่อดูว่าการเดินทิศทางไหนเป็นการหนี Pacman
-                        curr_dist = util.manhattanDistance((w2, h2), pacman_position)
-                        flee_moves = []
-                        other_moves = []
-
+                        # น้ำหนัก theta ถ้าระยะไม่ลด (ผีไม่เข้าใกล้ Pacman)
+                        # มิฉะนั้นน้ำหนัก 1 แล้ว normalize ให้ผลรวมเป็น 1
+                        curr_dist = util.manhattanDistance(
+                            (w2, h2), pacman_position)
+                        weights = []
                         for w1, h1 in legal_moves:
-                            next_dist = util.manhattanDistance((w1, h1), pacman_position)
-                            if next_dist > curr_dist:
-                                flee_moves.append((w1, h1))
-                            else:
-                                other_moves.append((w1, h1))
-
-                        # ให้ค่าน้ำหนักความน่าจะเป็นตามพารามิเตอร์ p_flee ของผี
-                        if flee_moves and other_moves:
-                            prob_flee = self.p_flee / len(flee_moves)
-                            prob_other = (1.0 - self.p_flee) / len(other_moves)
-                            for w1, h1 in flee_moves:
-                                transition_model[w1, h1, w2, h2] = prob_flee
-                            for w1, h1 in other_moves:
-                                transition_model[w1, h1, w2, h2] = prob_other
-                        else:
-                            # กรณีไม่มีทางเลือกหนี ให้แบ่งความน่าจะเป็นเท่ากัน (Uniform)
-                            prob = 1.0 / len(legal_moves)
-                            for w1, h1 in legal_moves:
-                                transition_model[w1, h1, w2, h2] = prob
+                            next_dist = util.manhattanDistance(
+                                (w1, h1), pacman_position)
+                            weights.append(
+                                self.theta if next_dist >= curr_dist else 1.0)
+                        total = sum(weights)
+                        for (w1, h1), weight in zip(legal_moves, weights):
+                            transition_model[w1, h1, w2, h2] = weight / total
 
         return transition_model
 
@@ -152,12 +143,9 @@ class BeliefStateAgent(Agent):
                 new_belief.append(np.zeros((width, height)))
             else:
                 # 1. Prediction Step (Time Update)
-                predicted_belief = np.zeros((width, height))
-                for w1 in range(width):
-                    for h1 in range(height):
-                        predicted_belief[w1, h1] = np.sum(
-                            trans_model[w1, h1, :, :] * belief[z]
-                        )
+                # P(X_t+1 = x1) = sum_{x2} P(x1 | x2) * b(x2)
+                predicted_belief = np.tensordot(
+                    trans_model, belief[z], axes=([2, 3], [0, 1]))
 
                 # 2. Measurement Update Step
                 sensor_model = self._get_sensor_model(
@@ -170,8 +158,11 @@ class BeliefStateAgent(Agent):
                 if total_prob > 0:
                     updated_belief /= total_prob
                 else:
-                    # Fallback กรณีไม่พบผี ปรับให้กระจายความน่าจะเป็นแบบสม่ำเสมอ
-                    updated_belief = np.ones((width, height)) / (width * height)
+                    # Fallback กรณีไม่พบผี: สม่ำเสมอบนช่องที่ไม่ใช่กำแพง
+                    free = np.array(
+                        [[not self.walls[w][h] for h in range(height)]
+                         for w in range(width)], dtype=float)
+                    updated_belief = free / np.sum(free)
 
                 new_belief.append(updated_belief)
 
@@ -213,9 +204,11 @@ class BeliefStateAgent(Agent):
                 # 3.a: ความไม่แน่นอน (Uncertainty / Entropy)
                 flat_b = b_state.flatten()
                 flat_b = flat_b[flat_b > 0]
-                entropy = -np.sum(flat_b * np.log2(flat_b)) if len(flat_b) > 0 else 0
+                entropy = 0
+                if len(flat_b) > 0:
+                    entropy = -np.sum(flat_b * np.log2(flat_b))
 
-                # 3.b: ประสิทธิภาพการคาดการณ์ (Quality / Mean Absolute Error - MAE)
+                # 3.b: คุณภาพการคาดการณ์ (ระยะ Manhattan คาดหวังถึงผีจริง)
                 gx, gy = int(true_positions[z][0]), int(true_positions[z][1])
                 grid_x, grid_y = np.indices(b_state.shape)
                 mae = np.sum(

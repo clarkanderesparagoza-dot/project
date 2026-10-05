@@ -20,7 +20,8 @@
 
 \title{\Large{INFO8006: Project 2 - Report}}
 \vspace{1cm}
-\author{\small{\bf Mr Pacman - s111111} \\ \small{\bf Miss Pacman - s222222}}
+% TODO: replace with your own name(s) and student number(s)
+\author\small{\bf Mr Clark Anderson Esparagoza - B6739300} 
 
 \maketitle
 
@@ -29,8 +30,60 @@
 \section{Bayes filter}
 
 \begin{enumerate}[label=\alph*.,leftmargin=*]
-    \item
-    \item
+    \item \textbf{Sensor model.}
+    Let $x_t=(w,h)$ be the position of a ghost, $q_t$ the position of Pacman
+    and $d_t(x)=|w-q_{t,1}|+|h-q_{t,2}|$ the Manhattan distance between a
+    cell $x$ and Pacman. The sensor returns the noisy distance
+    \begin{equation*}
+        E_t = d_t(x_t) + N_t, \qquad N_t = B_t - np, \qquad
+        B_t \sim \mathrm{Bin}(n,p),
+    \end{equation*}
+    with $p=\tfrac12$ and $n=\sigma^2/(p(1-p))=4\sigma^2$ (rounded down to an
+    integer), where $\sigma^2$ is the sensor variance (default $\sigma^2=1$,
+    hence $n=4$). The noise $N_t$ has mean $0$ and variance
+    $np(1-p)=\sigma^2$; it is independent of the ghost position and drawn
+    independently at each time step. Therefore, for an observed value $e$,
+    \begin{equation*}
+        P(E_t=e \mid X_t=x, q_t) =
+        \begin{cases}
+            \binom{n}{k}\,p^{k}(1-p)^{n-k}
+                & \text{if } k := e - d_t(x) + np \in \{0,\dots,n\},\\
+            0 & \text{otherwise.}
+        \end{cases}
+    \end{equation*}
+    In words, the measurement can only lie within $\pm np$ of the true
+    distance, so a measurement is compatible with a thick diamond-shaped ring
+    of cells around Pacman, whose thickness grows with $\sigma^2$.
+
+    \item \textbf{Unified transition model.}
+    Let $\mathcal N(x)$ be the set of the cells adjacent to $x$ that are not
+    walls. A ghost never stays still and, in this project, may move backward,
+    so it moves to one of the cells of $\mathcal N(x)$. Reading the three ghost
+    implementations, the probability of each move is proportional to a weight:
+    $1$ for every move for the \texttt{confused} ghost; $2$ if the move does
+    not bring the ghost closer to Pacman and $1$ otherwise for the
+    \texttt{afraid} ghost; and $2^3=8$ instead of $2$ for the \texttt{scared}
+    ghost. These three ghosts are therefore obtained from a single model with
+    one free parameter $\theta\ge 1$:
+    \begin{equation*}
+        P(X_{t+1}=x' \mid X_t=x, q_t) =
+        \frac{\omega_\theta(x',x)}{\sum_{y\in\mathcal N(x)}\omega_\theta(y,x)}
+        \ \text{ for } x'\in\mathcal N(x), \quad 0 \text{ otherwise,}
+    \end{equation*}
+    \begin{equation*}
+        \omega_\theta(x',x) =
+        \begin{cases}
+            \theta & \text{if } d_t(x') \ge d_t(x)
+                    \ \text{(the ghost does not get closer to Pacman)},\\
+            1 & \text{otherwise.}
+        \end{cases}
+    \end{equation*}
+    We recover \texttt{confused} with $\theta=1$ (uniform over the legal
+    moves), \texttt{afraid} with $\theta=2$ and \texttt{scared} with
+    $\theta=8$. If a ghost has $a$ moves that do not get it closer to Pacman
+    and $b$ moves that do, it flees with probability $\theta a/(\theta a+b)$,
+    so a larger $\theta$ means a more fearful ghost. If all the moves belong
+    to the same class, the model reduces to a uniform choice.
 \end{enumerate}
 
 \section{Implementation}
@@ -42,12 +95,105 @@
 \section{Experiment}
 
 \begin{enumerate}[label=\alph*.,leftmargin=*]
-    \item
-    \item
-    \item
-    \item
-    \item
-    \item
+    \item \textbf{Uncertainty measure.}
+    For a ghost with belief $b_t$ (a probability distribution over the free
+    cells), we use the Shannon entropy
+    \begin{equation*}
+        H(b_t) = -\sum_{x} b_t(x)\log_2 b_t(x),
+    \end{equation*}
+    with the convention $0\log_2 0=0$. It is $0$ when Pacman is certain of the
+    ghost position and maximal, $\log_2 |\{\text{free cells}\}|$, when the
+    belief is uniform. With several ghosts, we report the value for each ghost
+    that has not been eaten yet.
+
+    \item \textbf{Quality measure.}
+    Let $x^\star_t$ be the true position of a ghost. We use the expected
+    Manhattan distance between the belief and the ground truth,
+    \begin{equation*}
+        D(b_t, x^\star_t) = \sum_{x} b_t(x)\,
+            \big(|x_1-x^\star_{t,1}|+|x_2-x^\star_{t,2}|\big),
+    \end{equation*}
+    expressed in cells. The lower, the better. Unlike the entropy, it
+    penalizes a belief that is concentrated on a wrong location, so the two
+    measures are complementary: a confident but wrong filter has a low entropy
+    and a large $D$.
+
+    \item \textbf{Results.}
+    \textcolor{red}{[TODO: fill in with your own settings and results.]}
+    For each layout (\texttt{large\_filter} and \texttt{large\_filter\_walls})
+    and each ghost type (\texttt{scared}, \texttt{afraid},
+    \texttt{confused}), we ran \textcolor{red}{[N]} independent games with
+    different seeds, each lasting \textcolor{red}{[T]} time steps, with one
+    ghost and Pacman moving randomly among its legal actions. At every time
+    step, the entropy and the distance of the previous questions are recorded
+    and then averaged over the trials. The error bars show
+    \textcolor{red}{[the standard deviation / the standard error]} over the
+    trials. We chose $N$ and $T$ large enough for the curves to be flat and
+    the error bars to be stable at the end of the games.
+
+    \begin{figure}[h]
+        \centering
+        % \includegraphics[width=\linewidth]{results_large_filter.pdf}
+        \fbox{\parbox[c][4.2cm][c]{0.9\linewidth}{\centering
+            \textcolor{red}{[TODO: plot of entropy and expected distance vs.\
+            time step on \texttt{large\_filter}, three ghosts, with error bars]}}}
+        \caption{Results on \texttt{large\_filter}.}
+    \end{figure}
+
+    \begin{figure}[h]
+        \centering
+        % \includegraphics[width=\linewidth]{results_large_filter_walls.pdf}
+        \fbox{\parbox[c][4.2cm][c]{0.9\linewidth}{\centering
+            \textcolor{red}{[TODO: same plots on
+            \texttt{large\_filter\_walls}]}}}
+        \caption{Results on \texttt{large\_filter\_walls}.}
+    \end{figure}
+
+    \item \textbf{Effect of the transition parameter $\theta$.}
+    The parameter $\theta$ controls how predictable a ghost is. For
+    $\theta=1$ the ghost performs a uniform random walk: the prediction step
+    of the filter spreads the belief in all directions and adds a lot of
+    uncertainty at each step. When $\theta$ grows, the ghost flees with a
+    probability close to $1$ whenever it can, so its motion is nearly
+    deterministic and the prediction step adds less uncertainty. We therefore
+    expect a lower entropy and a lower distance for \texttt{scared} than for
+    \texttt{afraid}, and for \texttt{afraid} than for \texttt{confused}. The
+    layout also matters: in \texttt{large\_filter\_walls} the walls reduce the
+    number of reachable cells and the branching factor of the ghost, which
+    both lower the uncertainty added by the prediction step, whereas in the open
+    layout the belief can spread in more directions. A fleeing ghost may also
+    get trapped in a dead end or a corner, where the belief concentrates.
+    \textcolor{red}{[TODO: confirm or correct these statements with
+    the values observed in the figures, with default sensor variance.]}
+
+    \item \textbf{Effect of the sensor variance.}
+    The sensor variance $\sigma^2$ sets $n=4\sigma^2$, and hence the width
+    of the sensor likelihood: a measurement only tells that the ghost is on a
+    ring of thickness proportional to $\sigma$ around Pacman. The larger
+    $\sigma^2$, the thicker the ring, the flatter the posterior after the
+    update step, and the larger the entropy and the distance of the belief;
+    convergence also takes longer since more measurements are needed to
+    discard cells. For very small variances ($\sigma^2<0.25$ gives $n=0$) the
+    distance is exact and the posterior lies on a thin ring, but the ghost
+    position along this ring remains ambiguous until Pacman has moved
+    and the rings of several time steps can be combined.
+    \textcolor{red}{[TODO: back it up with the values observed for
+    several values of \texttt{--sensorvariance}.]}
+
+    \item \textbf{Controller to eat ghosts.}
+    Pacman only knows its position, its legal actions and the belief of each
+    ghost. A simple controller is: (i) pick a target among the ghosts that have
+    not been eaten, for instance the one whose belief mass is the most
+    concentrated or the closest to Pacman; (ii) take as goal the most likely cell
+    $\arg\max_x b(x)$ of this belief; (iii) among the legal actions,
+    choose the one leading to the cell closest to the goal. To be more robust, the
+    goal can be replaced by the cell minimizing the expected distance
+    $\sum_x b(x)\,d(\cdot,x)$ to the belief, and the distance by the
+    shortest path distance in the maze (computed with a breadth-first search on
+    the grid of free cells), so that Pacman does not get stuck against a wall.
+    When the belief is still diffuse, the controller can also move toward the
+    region that reduces the entropy the most before chasing.
+
     \item \textbf{\textit{Leave empty.}}
 \end{enumerate}
 

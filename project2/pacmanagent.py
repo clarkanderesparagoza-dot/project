@@ -1,10 +1,42 @@
 # Complete this class for all parts of the project
 
-from pacman_module.game import Agent
+from collections import deque
+
+from pacman_module.game import Agent, Actions
 from pacman_module.pacman import Directions
-from pacman_module import util
 import numpy as np
 import random
+
+
+def bfs_distances(walls, start):
+    """Shortest path lengths (in moves) from a cell to every other cell.
+
+    Arguments:
+    ----------
+    - `walls`: the grid of walls, as given by `state.getWalls()`.
+    - `start`: the (x, y) cell to start from.
+
+    Return:
+    -------
+    - A 2D array with the number of moves needed to reach each cell.
+      Walls and unreachable cells hold `width * height`.
+    """
+    unreachable = walls.width * walls.height
+    dist = np.full((walls.width, walls.height), unreachable, dtype=float)
+    dist[start[0], start[1]] = 0
+    queue = deque([start])
+    while queue:
+        x, y = queue.popleft()
+        for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < walls.width and 0 <= ny < walls.height):
+                continue
+            if walls[nx][ny] or dist[nx, ny] != unreachable:
+                continue
+            dist[nx, ny] = dist[x, y] + 1
+            queue.append((nx, ny))
+    return dist
+
 
 class PacmanAgent(Agent):
     def __init__(self, args):
@@ -19,6 +51,10 @@ class PacmanAgent(Agent):
         """
         Given a pacman game state and a belief state,
                 returns a legal move.
+
+        Pacman chases the ghost that is the closest on average (according
+        to its belief) and takes the move that minimizes the expected
+        shortest-path distance (walls included) to this ghost.
 
         Arguments:
         ----------
@@ -39,38 +75,29 @@ class PacmanAgent(Agent):
         if not legal_moves:
             return Directions.STOP
 
-        pacman_pos = state.getPacmanPosition()
-        target_pos = None
-        for b_state in belief_state:
-            if np.sum(b_state) > 0: # ผีตัวนี้ยังไม่โดนกิน
-                # ดึงพิกัด (x, y) ที่มีค่าความน่าจะเป็นสูงสุด
-                target_pos = np.unravel_index(np.argmax(b_state), b_state.shape)
-                break # ไล่ล่าทีละตัว
-
-        if target_pos is None:
-            # ถ้ากินผีหมดแล้ว หรือไม่มีข้อมูล ให้เดินแบบสุ่ม
+        # A ghost that has been eaten has a belief of zeros
+        alive = [b for b in belief_state if np.sum(b) > 0]
+        if not alive:
             return random.choice(legal_moves)
 
-        # 2. เลือกทิศทางที่ลดระยะทางไปหาเป้าหมายให้เหลือน้อยที่สุด (Greedy)
-        best_move = Directions.STOP
-        min_dist = float('inf')
+        walls = state.getWalls()
+        x, y = state.getPacmanPosition()
+        pacman_pos = (int(x), int(y))
 
+        # Target: the ghost that is the closest on average
+        dist_here = bfs_distances(walls, pacman_pos)
+        target = min(alive, key=lambda b: np.sum(b * dist_here))
+
+        # Move: the one that brings Pacman closest to the belief of the target
+        best_move = legal_moves[0]
+        best_score = float('inf')
         for move in legal_moves:
-            next_pos = pacman_pos
-            if move == Directions.NORTH:   next_pos = (pacman_pos[0], pacman_pos[1] + 1)
-            elif move == Directions.SOUTH: next_pos = (pacman_pos[0], pacman_pos[1] - 1)
-            elif move == Directions.EAST:  next_pos = (pacman_pos[0] + 1, pacman_pos[1])
-            elif move == Directions.WEST:  next_pos = (pacman_pos[0] - 1, pacman_pos[1])
-
-            dist = util.manhattanDistance(next_pos, target_pos)
-            
-            if dist < min_dist:
-                min_dist = dist
+            dx, dy = Actions.directionToVector(move)
+            next_pos = (pacman_pos[0] + int(dx), pacman_pos[1] + int(dy))
+            score = np.sum(target * bfs_distances(walls, next_pos))
+            if score < best_score - 1e-12:
+                best_score = score
                 best_move = move
 
         return best_move
-
         # XXX: End of your code here to obtain bonus
-        
-
-        return Directions.STOP
